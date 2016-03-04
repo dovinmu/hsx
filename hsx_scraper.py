@@ -18,7 +18,7 @@ def get_all_prices():
 
     while curr_page <= page_count:
         r = requests.get('http://www.hsx.com/security/list.php?id=1&sfield=name&sdir=asc&page={}'.format(curr_page))
-        soup = BeautifulSoup(r.text)
+        soup = BeautifulSoup(r.text, 'lxml')
         if page_count == 1:
             page_count = int(soup.text[soup.text.find('Page 1 of')+9:soup.text.find('Page 1 of')+12])
             print('Scraping {} pages from hsx.com/securities/list.php'.format(page_count))
@@ -112,6 +112,8 @@ if __name__ == '__main__':
             for sec in sys.argv[2:]:
                 secs.append(sec)
             plot_securities(secs)
+        elif sys.argv[1] == '-v' or sys.argv[1] == '--volatility':
+            print('not yet implemented')
     elif len(sys.argv) == 1:
         df = get_all_prices()
         print('Summary:')

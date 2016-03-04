@@ -75,10 +75,33 @@ def plotSimilarOpening(film, count=8, above=0):
             try:
                 s.cumsum().plot()
             except:
-                print('Could not plot {} because fuck you'.format(film))
+                print('Could not plot {}, mysteriously'.format(film))
     plt.legend(loc='upper left')
     ax = plt.gca()
     y_format = tkr.FuncFormatter(formatter)
     ax.yaxis.set_major_formatter(y_format)
     plt.title('Films with a similar opening day gross as {0} (${1}m)'.format(fidToName(film), int(series[1]/10000)/100))
     plt.show()
+
+def predictGrossCurve(series, day):
+    '''Return a prediction of the grosses per day up until the specified day after release, given a series of daily grosses.
+
+    NOTE: this is extremely rudimentary for now until I get the rest of the infrastructure in place.
+    '''
+    cumsum_actual = 0
+    cumsum_model = 0
+    daygross_model = series[1]
+    daygross_actual = series[1]
+    print('day: actual  model     cum_actual cum_model')
+    for i in range(1, day+1):
+        if i < len(series):
+            cumsum_actual += series[i]
+            daygross_actual = series[i]
+        cumsum_model += daygross_model
+        print('{0}: {1}    {2}        {3}    {4}'.format(i,
+            int(daygross_actual/10000)/100,
+            int(daygross_model/10000)/100,
+            int(cumsum_actual/10000)/100,
+            int(cumsum_model/10000)/100
+            ))
+        daygross_model = daygross_model * (5/6)

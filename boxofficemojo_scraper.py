@@ -44,7 +44,7 @@ def downloadDailies(movie_id, movie_name='', save=True):
     r = requests.get('{0}/movies/?page=daily&view=chart&id={1}.htm'.format(base_url, movie_id))
     soup = BeautifulSoup(r.text,'lxml')
 
-    if not name:
+    if not movie_name:
         try:
             movie_name = soup.find('font', attrs={'face':'Verdana', 'size':'6'}).text
         except:
