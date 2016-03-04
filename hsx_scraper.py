@@ -3,7 +3,6 @@ import requests
 from bs4 import BeautifulSoup
 import time
 from datetime import datetime
-import matplotlib.pyplot as plt
 import sys
 
 price_url = "http://www.hsx.com/chart/detail_chart_data.php?id={}"
@@ -35,14 +34,6 @@ def get_all_prices():
     df['MovementPercent'] = df['MovementPercent'].map(lambda x: float(x.replace('%','')))
     df['Price'] = df['Price'].map(lambda x: float(x.replace('H$', '')))
     df['MovementPrice'] = df['MovementPrice'].map(lambda x: float(x.replace('H$', '')))
-    
-    '''
-    prices[datetime.now()] = df['Price']
-    if last_price is not None:
-        diff = df['Price'] - last_price
-        print(datetime.now(), '\n', diff[diff != 0])
-    last_price = df['Price']
-    '''
     return df
 
 sec_to_id = Series()
@@ -89,34 +80,34 @@ def get_historic(sec):
         prices[date] = float(entry[1])
     return Series(prices)
 
-def plot_securities(sec_list):
-    for sec in sec_list:
-        series = get_historic(sec)
-        series.plot(label=sec)
-    plt.legend(loc=3)
-    plt.show()
-
 def get_all_historic():
-    df = get_all_prices()    
+    df = get_all_prices()
     for idx in df.index:
         hist = get_historic(idx)
         all_historic_prices[idx] = hist
         if not hist.empty:
             print('{0}: start {1}, max {3}, min {4}, end {2} \t diff {5}'.format(idx, hist[0], hist[-1], hist.max(), hist.min(), hist[-1] - hist[0]))
-    
 
 if __name__ == '__main__':
-    if len(sys.argv) > 2:
-        if sys.argv[1] == '-s':
-            secs = []
-            for sec in sys.argv[2:]:
-                secs.append(sec)
-            plot_securities(secs)
-        elif sys.argv[1] == '-v' or sys.argv[1] == '--volatility':
-            print('not yet implemented')
+    if len(sys.argv) > 1:
+        arg = sys.argv[1]
+        if arg == 'all':
+            df = get_all_prices()
+            print('Summary:')
+            print(df.sort('Price')[['Name','Price']])
+        else:
+            print('Finding history of security {}'.format(arg))
+            s = get_historic(arg)
+            print(s)
     elif len(sys.argv) == 1:
-        df = get_all_prices()
-        print('Summary:')
-        print(df.sort('Price')[['Name','Price']])
-
-
+        print(
+        '''
+        Usage:
+            hsx_scraper.py all: Scrape all current securities on hsx
+            hsx_scraper.py <sec>: Get a time series of the past year's prices
+                                  for the given security by day. securities
+                                  for a given film can be found as the index
+                                  of the DataFrame that is returned by using
+                                  the 'all' command.
+        '''
+        )
