@@ -1,10 +1,17 @@
 from boxofficemojo_scraper import *
+import numpy as np
 
 _fidToName = []
 def _loadFid():
     global _fidToName
     s = Series.from_csv('boxoffice/'+film_index_name)
     _fidToName = Series(s.index, index=s.values)
+
+def filmDict():
+    global _fidToName
+    if len(_fidToName) == 0:
+        _loadFid()
+    return _fidToName
 
 def fidToName(fid):
     global _fidToName
@@ -83,25 +90,53 @@ def plotSimilarOpening(film, count=8, above=0):
     plt.title('Films with a similar opening day gross as {0} (${1}m)'.format(fidToName(film), int(series[1]/10000)/100))
     plt.show()
 
-def predictGrossCurve(series, day):
-    '''Return a prediction of the grosses per day up until the specified day after release, given a series of daily grosses.
+def predictGrossCurveCompoundMultiplication(series, day=28, multiplier=.83):
+    '''Return a prediction of the grosses per day up until the specified day after release, given a series of daily grosses. Prediction works by
+    starting with the opening day and gets the nth day by multiplying the
+    (n-1)th by the multiplier.
 
-    NOTE: this is extremely rudimentary for now until I get the rest of the infrastructure in place.
+    Best multiplier for a given day parameter:
+    7:  .73
+    14: .81
+    28: .83
+    56: .83
     '''
-    cumsum_actual = 0
-    cumsum_model = 0
-    daygross_model = series[1]
-    daygross_actual = series[1]
-    print('day: actual  model     cum_actual cum_model')
+    daygross_model = series.iloc[0]
+    predict = Series()
+    #TODO: test if it's more efficient to build values in a list and then
+    #instantiate series instead of modifying series values individually
     for i in range(1, day+1):
-        if i < len(series):
-            cumsum_actual += series[i]
-            daygross_actual = series[i]
-        cumsum_model += daygross_model
-        print('{0}: {1}    {2}        {3}    {4}'.format(i,
-            int(daygross_actual/10000)/100,
-            int(daygross_model/10000)/100,
-            int(cumsum_actual/10000)/100,
-            int(cumsum_model/10000)/100
-            ))
-        daygross_model = daygross_model * (5/6)
+        predict.set_value(i, daygross_model)
+        daygross_model = daygross_model * multiplier
+    return predict
+
+def predictionError(actual, predict, day=28):
+    idx = min(min(len(actual),len(predict)), day)
+    diff = (actual/1000000 - predict/1000000)**2
+    return diff.sum()
+
+def getErrorMatrix():
+    matrix = Series()
+    films = filmDict()
+    for film in films.items():
+        series = asSeries(loadDailies(film[0]))
+        predict = predictGrossCurve(series, 28)
+        matrix.set_value(film[1], predictionError(series, predict))
+    return matrix
+
+def evaluateModelWithParamRange(start, end, step, days=28):
+    matrix = Series()
+    films = filmDict()
+    series_list = []
+    for film in films.items():
+        series = asSeries(loadDailies(film[0]))
+        series_list.append((film[0],series))
+    scores = Series()
+    for param in np.arange(start,end,step):
+        matrix = Series()
+        for film,series in series_list:
+            predict = predictGrossCurveCompoundMultiplication(series, days, param)
+            matrix.set_value(film, predictionError(series, predict, days))
+        scores.set_value(str(param), matrix.sum())
+        print(str(param), matrix.sum())
+    return scores
