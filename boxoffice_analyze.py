@@ -22,8 +22,8 @@ def fidToName(fid):
 def findFilm(s):
     global _fidToName
     if len(_fidToName) == 0:
-        s = Series.from_csv('boxoffice/'+film_index_name)
-        _fidToName = Series(s.index, index=s.values)
+        series = Series.from_csv('boxoffice/'+film_index_name)
+        _fidToName = Series(series.index, index=series.values)
     s = s.lower()
     result = []
     for fid, name in _fidToName.items():
@@ -90,7 +90,65 @@ def plotSimilarOpening(film, count=8, above=0):
     plt.title('Films with a similar opening day gross as {0} (${1}m)'.format(fidToName(film), int(series[1]/10000)/100))
     plt.show()
 
-def predictGrossCurveCompoundMultiplication(series, day=28, multiplier=.83):
+
+def plotPredictionAndActual(filmname, day=28, plot='daily', constrain_input=7):
+    df = loadDailies(filmname)
+
+    actual = df['Gross']
+    predicted = predictDecayByDay(df,day=day,index='integer', constrain_input=constrain_input)
+
+    if plot=='cumsum':
+        actual[:limit].cumsum().plot(label='Gross')
+        predicted.cumsum().plot(label='Predicted gross')
+        plt.legend(loc='upper left')
+    elif plot=='daily':
+        actual[:limit].plot(label='Gross')
+        predicted.plot(label='Predicted gross')
+        plt.legend(loc='upper right')
+    ax = plt.gca()
+    y_format = tkr.FuncFormatter(formatter)
+    ax.yaxis.set_major_formatter(y_format)
+    plt.title('"' + filmname.capitalize() + '" daily gross prediction. M.S. Error: ' + str(int(meanSquaredError(actual, predicted, limit)*10)/10))
+    plt.show()
+
+def predictDayFromDay(actual, value, predict):
+    '''
+    Predict the gross for a film on the given day given the value of another day's gross.
+    actual: the day of the week (e.g., 'Fri') the film grossed $value
+    value: the gross of the film on day actual (e.g., the first Friday)
+    predict: The day of the week to predict (e.g., 'Sat')
+
+    NOTE: this is rudimentary until I calculate a data-centric first-week curve.
+    '''
+    weekday = ['Mon', 'Tue', 'Wed', 'Thu']
+    weekend = ['Fri', 'Sat', 'Sun']
+    if actual in weekend and predict in weekend:
+        return value
+    if actual in weekday and predict in weekday:
+        return value
+    if actual in weekday and predict in weekend:
+        return value*3
+    if actual in weekend and predict in weekday:
+        return value/3
+    return -1
+
+def extrapolateFirstWeek(df, limit=7):
+    week = Series(index=['Fri','Sat','Sun','Mon','Tue','Wed','Thu'])
+    for i in range(min(len(df),limit)):
+        day = df.iloc[i].Day
+        week[day] = df.iloc[i].Gross
+    comparison_day = None
+    for day in week.items():
+        if not np.isnan(day[1]):
+            comparison_day = day
+            break
+    for day in week.items():
+        if np.isnan(week[day[0]]):
+            predict = predictDayFromDay(comparison_day[0], comparison_day[1], day[0])
+            week[day[0]] = predict
+    return week
+
+def predictCompoundMultiplication(series, day=28, multiplier=.83):
     '''Return a prediction of the grosses per day up until the specified day after release, given a series of daily grosses. Prediction works by
     starting with the opening day and gets the nth day by multiplying the
     (n-1)th by the multiplier.
@@ -110,10 +168,40 @@ def predictGrossCurveCompoundMultiplication(series, day=28, multiplier=.83):
         daygross_model = daygross_model * multiplier
     return predict
 
-def predictionError(actual, predict, day=28):
+def predictDecayByDay(df, day=28, index='day-of-week', constrain_input=7):
+    '''Return a prediction of the grosses per day up until the specified day after release, given a series of daily grosses. Prediction works by
+    applying a precomputed decay rate for each day of the week. If no data
+    exists for the first day of the week, then that data is also estimated.
+
+    day: number of days from release to be predicted
+    index: what to index the returned time series with
+    constrain_input: used to artificially limit input variables even if the data exists
+    '''
+    print('released on a ' + df.iloc[0].Day)
+    firstWeek = extrapolateFirstWeek(df, constrain_input)
+    series = asSeries(df)
+    constants = [1] * 7
+    predict = Series()
+    dayCount = 1
+    for weeknum in range(1, int(day/7) +1):
+        for i in range(7):
+            const = constants[i]
+            day = firstWeek.index[i]
+            prediction = firstWeek[i] * 1/(const * weeknum)
+            if index=='day-of-week':
+                predict.set_value(day + ' ' + str(weeknum), prediction)
+            elif index=='integer':
+                predict.set_value(dayCount, prediction)
+                dayCount += 1
+    return predict
+
+def meanSquaredError(actual, predict, day=28):
+    '''
+    Get the Mean Squared Error for day 1 through n (or the length of the shorter series, whichever is smaller), denoted in millions.
+    '''
     idx = min(min(len(actual),len(predict)), day)
-    diff = (actual/1000000 - predict/1000000)**2
-    return diff.sum()
+    diff = (actual[:idx]/1000000 - predict[:idx]/1000000)**2
+    return diff.sum() / idx
 
 def getErrorMatrix():
     matrix = Series()
@@ -121,7 +209,7 @@ def getErrorMatrix():
     for film in films.items():
         series = asSeries(loadDailies(film[0]))
         predict = predictGrossCurve(series, 28)
-        matrix.set_value(film[1], predictionError(series, predict))
+        matrix.set_value(film[1], meanSquaredError(series, predict))
     return matrix
 
 def evaluateModelWithParamRange(start, end, step, days=28):
@@ -135,8 +223,8 @@ def evaluateModelWithParamRange(start, end, step, days=28):
     for param in np.arange(start,end,step):
         matrix = Series()
         for film,series in series_list:
-            predict = predictGrossCurveCompoundMultiplication(series, days, param)
-            matrix.set_value(film, predictionError(series, predict, days))
+            predict = predictCompoundMultiplication(series, days, param)
+            matrix.set_value(film, meanSquaredError(series, predict, days))
         scores.set_value(str(param), matrix.sum())
         print(str(param), matrix.sum())
     return scores
