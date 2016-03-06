@@ -91,24 +91,36 @@ def plotSimilarOpening(film, count=8, above=0):
     plt.show()
 
 
-def plotPredictionAndActual(filmname, day=28, plot='daily', constrain_input=7):
-    df = loadDailies(filmname)
+def plotPredictionAndActual(filmid, day=28, plot='daily', constrain_input=7):
+    '''
+    Uses the per-day decay model to predict film grosses.
 
+    filmid: The internal film ID from Box Office Mojo
+    day: number of days from release to be predicted
+    plot: Used to specify if the models should compare daily grosses or cumulative gross sums.
+    constrain_input: used to artificially limit input variables even if the data exists
+
+    Note: doesn't factor in limited-to-wide releases.
+    '''
+    df = loadDailies(filmid)
+    filmname = fidToName(filmid)
     actual = df['Gross']
     predicted = predictDecayByDay(df,day=day,index='integer', constrain_input=constrain_input)
 
     if plot=='cumsum':
-        actual[:limit].cumsum().plot(label='Gross')
+        actual[:day].cumsum().plot(label='Gross')
         predicted.cumsum().plot(label='Predicted gross')
         plt.legend(loc='upper left')
     elif plot=='daily':
-        actual[:limit].plot(label='Gross')
+        actual[:day].plot(label='Gross')
         predicted.plot(label='Predicted gross')
         plt.legend(loc='upper right')
     ax = plt.gca()
     y_format = tkr.FuncFormatter(formatter)
     ax.yaxis.set_major_formatter(y_format)
-    plt.title('"' + filmname.capitalize() + '" daily gross prediction. M.S. Error: ' + str(int(meanSquaredError(actual, predicted, limit)*10)/10))
+    msError = meanSquaredError(actual, predicted, day)
+    cumError = int((predicted[:len(actual[:day])].sum() - actual[:day].sum()) /10000)/100
+    plt.title('"{0}" ({1}) daily gross prediction. \nM.S. Error: {2}  Cum Error: {3}m'.format(filmname, filmid, str(int(msError*10)/10), cumError))
     plt.show()
 
 def predictDayFromDay(actual, value, predict):
@@ -168,7 +180,7 @@ def predictCompoundMultiplication(series, day=28, multiplier=.83):
         daygross_model = daygross_model * multiplier
     return predict
 
-def predictDecayByDay(df, day=28, index='day-of-week', constrain_input=7):
+def predictDecayByDay(df, day=28, index='integer', constrain_input=7):
     '''Return a prediction of the grosses per day up until the specified day after release, given a series of daily grosses. Prediction works by
     applying a precomputed decay rate for each day of the week. If no data
     exists for the first day of the week, then that data is also estimated.
@@ -177,7 +189,7 @@ def predictDecayByDay(df, day=28, index='day-of-week', constrain_input=7):
     index: what to index the returned time series with
     constrain_input: used to artificially limit input variables even if the data exists
     '''
-    print('released on a ' + df.iloc[0].Day)
+    #print('released on a ' + df.iloc[0].Day)
     firstWeek = extrapolateFirstWeek(df, constrain_input)
     series = asSeries(df)
     constants = [1] * 7
@@ -207,10 +219,23 @@ def getErrorMatrix():
     matrix = Series()
     films = filmDict()
     for film in films.items():
-        series = asSeries(loadDailies(film[0]))
-        predict = predictGrossCurve(series, 28)
-        matrix.set_value(film[1], meanSquaredError(series, predict))
+        df = loadDailies(film[0])
+        actual = asSeries(df)
+        predict = predictDecayByDay(df, 28)
+        matrix.set_value(film[1], meanSquaredError(actual, predict))
     return matrix
+
+def getCumsumOffsetMatrix(day=28):
+    matrix = Series()
+    films = filmDict()
+    for film in films.items():
+        df = loadDailies(film[0])
+        actual = asSeries(df)
+        predict = predictDecayByDay(df, day)
+        cumError = int((predict[:len(actual[:day])].sum() - actual[:day].sum()) /10000)/100
+        matrix.set_value(film[1], cumError)
+    return matrix
+
 
 def evaluateModelWithParamRange(start, end, step, days=28):
     matrix = Series()
