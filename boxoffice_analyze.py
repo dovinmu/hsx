@@ -1,5 +1,6 @@
 from boxofficemojo_scraper import *
 import numpy as np
+import pandas as pd
 
 _fidToName = []
 def _loadFid():
@@ -38,6 +39,14 @@ def loadDailies(film):
     except:
         df = downloadDailies(film)
         _loadFid()
+    #clean any data in need of cleaning
+    if df.empty:
+        return df
+    if df['Theaters'].dtype != 'int64':
+        df['Theaters'] = df['Theaters'].map(lambda x: x.replace(',',''))
+        df['Theaters'] = df['Theaters'].astype('int64')
+    if df['Rank'].dtype != 'float64' and df['Rank'].dtype != 'int64':
+        df['Rank'] = df['Rank'].map(lambda x: float(x.replace('-','nan')))
     return df
 
 def asSeries(df, name='', limit=0):
@@ -105,7 +114,7 @@ def plotPredictionAndActual(filmid, day=28, plot='daily', constrain_input=7):
     df = loadDailies(filmid)
     filmname = fidToName(filmid)
     actual = df['Gross']
-    predicted = predictDecayByDay(df,day=day,index='integer', constrain_input=constrain_input)
+    predicted = predictDecayByDay(df,day_limit=day,index='integer', constrain_input=constrain_input)
 
     if plot=='cumsum':
         actual[:day].cumsum().plot(label='Gross')
@@ -119,7 +128,7 @@ def plotPredictionAndActual(filmid, day=28, plot='daily', constrain_input=7):
     y_format = tkr.FuncFormatter(formatter)
     ax.yaxis.set_major_formatter(y_format)
     msError = meanSquaredError(actual, predicted, day)
-    cumError = int((predicted[:len(actual[:day])].sum() - actual[:day].sum()) /10000)/100
+    cumError = int(cumsumOffset(actual, predicted)/10000)/100
     plt.title('"{0}" ({1}) daily gross prediction. \nM.S. Error: {2}  Cum Error: {3}m'.format(filmname, filmid, str(int(msError*10)/10), cumError))
     plt.show()
 
@@ -139,9 +148,9 @@ def predictDayFromDay(actual, value, predict):
     if actual in weekday and predict in weekday:
         return value
     if actual in weekday and predict in weekend:
-        return value*3
+        return value*5
     if actual in weekend and predict in weekday:
-        return value/3
+        return value/5
     return -1
 
 def extrapolateFirstWeek(df, limit=7):
@@ -180,7 +189,33 @@ def predictCompoundMultiplication(series, day=28, multiplier=.83):
         daygross_model = daygross_model * multiplier
     return predict
 
-def predictDecayByDay(df, day=28, index='integer', constrain_input=7):
+def decayProgression(df, plot=True):
+    '''
+    Get a series with the average weekly drop in gross sales, by day of the week, of the given film.
+    '''
+    result = Series()
+    for day in ['Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu']:
+        if day in df['Day'].values:
+            if plot:
+                df[df['Day']==day]['% Change Prev Week'].plot(label=day)
+            result.set_value(day, df[df['Day']==day]['% Change Prev Week'][1:].mean())
+    if plot:
+        plt.legend()
+        plt.show()
+    return result
+
+def skipLimitedRun(df):
+    '''
+    Get a dataframe that begins with the film's wide release (if it had one).
+    The definition of a wide release is 600 or more theaters.
+    '''
+    #print(df['Theaters'].unique())
+    if len(df[df['Theaters'] >= 600]) > 0:
+        ts = df[df['Theaters'] >= 600].index[0]
+        return df[ts.to_datetime():]
+    return df
+
+def predictDecayByDay(df, day_limit=28, index='integer', constrain_input=7):
     '''Return a prediction of the grosses per day up until the specified day after release, given a series of daily grosses. Prediction works by
     applying a precomputed decay rate for each day of the week. If no data
     exists for the first day of the week, then that data is also estimated.
@@ -189,22 +224,29 @@ def predictDecayByDay(df, day=28, index='integer', constrain_input=7):
     index: what to index the returned time series with
     constrain_input: used to artificially limit input variables even if the data exists
     '''
-    #print('released on a ' + df.iloc[0].Day)
-    firstWeek = extrapolateFirstWeek(df, constrain_input)
+    prevWeek = None
+    currWeek = extrapolateFirstWeek(df, constrain_input)
+
     series = asSeries(df)
-    constants = [1] * 7
+    #these values were calculated from the top ~180 films from 2015
+    avg_percent_drop = Series([37, 33, 30, 21, 34, 34, 34], index=['Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu'])
     predict = Series()
     dayCount = 1
-    for weeknum in range(1, int(day/7) +1):
+    for weeknum in range(1, int(day_limit/7) +1):
         for i in range(7):
-            const = constants[i]
-            day = firstWeek.index[i]
-            prediction = firstWeek[i] * 1/(const * weeknum)
+            day = currWeek.index[i]
+            drop_percent = avg_percent_drop[day]
+            if prevWeek is not None: #don't apply this formula to first week
+                prediction = prevWeek[i] - prevWeek[i] * drop_percent/100
+            else:
+                prediction = currWeek[i]
+            currWeek[day] = prediction
             if index=='day-of-week':
                 predict.set_value(day + ' ' + str(weeknum), prediction)
             elif index=='integer':
                 predict.set_value(dayCount, prediction)
                 dayCount += 1
+        prevWeek = currWeek
     return predict
 
 def meanSquaredError(actual, predict, day=28):
@@ -214,6 +256,9 @@ def meanSquaredError(actual, predict, day=28):
     idx = min(min(len(actual),len(predict)), day)
     diff = (actual[:idx]/1000000 - predict[:idx]/1000000)**2
     return diff.sum() / idx
+
+def cumsumOffset(actual, predict, limit=28):
+    return predict[:len(actual[:limit])].sum() - actual[:limit].sum()
 
 def getErrorMatrix():
     matrix = Series()
@@ -232,10 +277,19 @@ def getCumsumOffsetMatrix(day=28):
         df = loadDailies(film[0])
         actual = asSeries(df)
         predict = predictDecayByDay(df, day)
-        cumError = int((predict[:len(actual[:day])].sum() - actual[:day].sum()) /10000)/100
+        cumError = int((cumsumOffset(actual, predict)) /10000)/100
         matrix.set_value(film[1], cumError)
     return matrix
 
+def cumsumOffsetSweep(filmid, day=28):
+    df = loadDailies(filmid)
+    filmname = fidToName(filmid)
+    actual = df['Gross']
+    result = Series()
+    for i in range(1,8):
+        predict = predictDecayByDay(df,day_limit=day,index='integer', constrain_input=i)
+        result.set_value(i, cumsumOffset(actual, predict, day))
+    return result
 
 def evaluateModelWithParamRange(start, end, step, days=28):
     matrix = Series()
