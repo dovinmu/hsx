@@ -7,8 +7,14 @@ import sys
 
 price_url = "http://www.hsx.com/chart/detail_chart_data.php?id={}"
 
-#This is the expensive way of loading all the prices
 def get_all_prices():
+    '''
+    Scrape the current price for each stock on HSX (usually requests 25 pages).
+    Returns a DataFrame indexed by the HSX security ID for each film.
+
+    Movement price: amount the price has changed today
+    Movement percent: percent the price has changed today
+    '''
     start_time = datetime.now()
     page_count = 1
     curr_page = 1
@@ -39,6 +45,7 @@ def get_all_prices():
 sec_to_id = Series()
 
 def get_id(sec):
+    '''Scrape the internal HTML ID for the film'''
     global sec_to_id
     if sec_to_id.empty:
         try:
@@ -64,6 +71,7 @@ def get_id(sec):
     return sec_to_id[sec]
 
 def get_historic(sec):
+    '''Scrape the per-day historic price variations for the film'''
     sec_id = get_id(sec)
     if sec_id < 0:
         return Series()
@@ -81,6 +89,7 @@ def get_historic(sec):
     return Series(prices)
 
 def get_all_historic():
+    '''Scrapes historic data for every film in the DataFrame'''
     df = get_all_prices()
     for idx in df.index:
         hist = get_historic(idx)
