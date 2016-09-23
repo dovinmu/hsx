@@ -9,12 +9,10 @@ Dependencies:
  * matplotlib
  * requests
 
-# Using hsx_scraper.py:
+### Using hsx_scraper.py:
 hsx_scraper.py all: Scrape all current securities on hsx
 hsx_scraper.py <sec>: Get a time series of the past year's prices
                       for the given security by day. Securities
                       for a given film can be found as the index
                       of the DataFrame that is returned by using
                       the 'all' command.
-
-# Using boxoffice_analyze.py:
